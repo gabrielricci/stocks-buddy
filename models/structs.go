@@ -1,19 +1,56 @@
-package commands
+package models
+
+import(
+	"time"
+
+	"github.com/jinzhu/gorm"
+)
+
+type Quote struct {
+	Ticker             string
+	Date               time.Time
+	MarketState        string
+	Delay              int
+
+	Last               float64
+	Bid                float64
+	Ask                float64
+	Open               float64
+	PreviousClose      float64
+	High               float64
+	Low                float64
+
+	SharesOutstanding  int
+	MarketCap          int64
+}
+
+type HistoricalQuote struct {
+	Ticker    string
+	Date      time.Time
+	Open      float64
+	High      float64
+	Low       float64
+	Close     float64
+	Volume    float64
+	AdjClose  float64
+}
+
 
 type Stock struct {
-	Ticker                          string
+	gorm.Model
 
-	YearlyBalanceSheetStatements    []*BalanceSheetStatement
-	YearlyCashflowStatements        []*CashflowStatement
-	YearlyIncomeStatements          []*IncomeStatement
+	Ticker                 string `gorm:"primary_key"`
 
-	QuarterlyBalanceSheetStatements []*BalanceSheetStatement
-	QuarterlyCashflowStatements     []*CashflowStatement
-	QuarterlyIncomeStatements       []*IncomeStatement
+	BalanceSheetStatements []*BalanceSheetStatement
+	CashflowStatements     []*CashflowStatement
+	IncomeStatements       []*IncomeStatement
 }
 
 type BalanceSheetStatement struct {
-	Period string
+	gorm.Model
+	Ticker string `gorm:"unique_index:uq_balance_ticker_period"`
+	Period *time.Time `gorm:"unique_index:uq_balance_ticker_period"`
+	Yearly bool `gorm:"unique_index:uq_balance_ticker_period"`
 	LongTermDebt int64
 	TotalLiab int64
 	TotalCurrentAssets int64
@@ -35,6 +72,7 @@ type BalanceSheetStatement struct {
 	CommonStock int64
 	DeferredLongTermAssetCharges int64
 	RetainedEarnings int64
+	ShortTermInvestments int64
 	LongTermInvestments int64
 	TotalStockholderEquity int64
 	Cash int64
@@ -43,7 +81,10 @@ type BalanceSheetStatement struct {
 }
 
 type CashflowStatement struct {
-	Period string
+	gorm.Model
+	Ticker string `gorm:"unique_index:uq_cashflow_ticker_period"`
+	Period *time.Time `gorm:"unique_index:uq_cashflow_ticker_period"`
+	Yearly bool `gorm:"unique_index:uq_cashflow_ticker_period"`
 	CapitalExpenditures int64
 	ChangeToAccountReceivables int64
 	NetIncome int64
@@ -61,7 +102,10 @@ type CashflowStatement struct {
 }
 
 type IncomeStatement struct {
-	Period string
+	gorm.Model
+	Ticker string `gorm:"unique_index:uq_income_ticker_period"`
+	Period *time.Time `gorm:"unique_index:uq_income_ticker_period"`
+	Yearly bool `gorm:"unique_index:uq_income_ticker_period"`
 	IncomeTaxExpense int64
 	TotalOperatingExpenses int64
 	ResearchDevelopment int64
@@ -84,5 +128,6 @@ type IncomeStatement struct {
 	CostOfRevenue int64
 	SellingGeneralAdministrative int64
 	OperatingIncome int64
+
 	NetIncomeFromContinuingOps int64
 }

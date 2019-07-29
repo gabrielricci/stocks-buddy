@@ -2,53 +2,58 @@ package commands
 
 import (
 	"fmt"
-	"log"
 	"time"
 	"strconv"
 	"reflect"
+	"errors"
 
 	"github.com/tidwall/gjson"
 	"io/ioutil"
+
+	"gabrielricci/stocks/common"
+	models "gabrielricci/stocks/models"
 )
 
-const json_dir = "data/yahoo_finance/"
-
-func ImportYahooFinanceFiles() bool {
-	return execute()
-}
-
-func execute() bool {
-	files, err := ioutil.ReadDir(json_dir)
+func ExecImportYahooFinanceCommand(env *common.Env, path string) error {
+	files, err := ioutil.ReadDir(path)
 	if err != nil {
-		log.Println("Error reading stocks dir")
-		return false
+		return errors.New("Could not read stocks path")
 	}
 
 	for _, file := range files {
-		parseFile(json_dir + file.Name())
+		parseFile(env, path + file.Name())
 	}
 
-	return true
+	return nil
 }
 
-func parseFile(filepath string) {
+func parseFile(env *common.Env, filepath string) {
 	contents, err := ioutil.ReadFile(filepath)
 	if err != nil {
-		fmt.Println("Error reading contents of ", filepath)
+		fmt.Println("ERROR: Could not read  contents of", filepath)
 		return;
 	}
 
 	jsonData := gjson.Parse(string(contents)).Get("QuoteSummaryStore.0")
 	ticker := jsonData.Get("price.symbol").String()
+	fmt.Println("Importing", ticker)
 
-	fmt.Println("Parseing stock", ticker)
 
-	var yearlyBalanceSheetsList    []*BalanceSheetStatement
-	var yearlyCashflowList         []*CashflowStatement
-	var yearlyIncomeList           []*IncomeStatement
-	var quarterlyBalanceSheetsList []*BalanceSheetStatement
-	var quarterlyCashflowList      []*CashflowStatement
-	var quarterlyIncomeList        []*IncomeStatement
+	stock := &models.Stock{
+		Ticker: ticker,
+	}
+
+	fmt.Println(stock.Ticker)
+
+	err = env.Repository.CreateStock(stock)
+	if err != nil {
+		fmt.Println("Error saving the stock data:", err)
+		return;
+	}
+
+	var balanceSheetsList    []*models.BalanceSheetStatement
+	var cashflowList         []*models.CashflowStatement
+	var incomeList           []*models.IncomeStatement
 
 	yearlyBalanceSheets    := jsonData.Get("balanceSheetHistory.balanceSheetStatements")
 	yearlyCashflow         := jsonData.Get("cashflowStatementHistory.cashflowStatements")
@@ -59,69 +64,61 @@ func parseFile(filepath string) {
 
 	if yearlyBalanceSheets.Exists() {
 		for _, balanceSheet := range yearlyBalanceSheets.Array() {
-			sheet := newBalanceSheetStatement(balanceSheet, true)
-			yearlyBalanceSheetsList = append(yearlyBalanceSheetsList, sheet)
+			statement := newBalanceSheetStatement(ticker, balanceSheet, true)
+			env.Repository.CreateBalanceSheetStatement(statement)
+			balanceSheetsList = append(balanceSheetsList, statement)
 		}
 	}
 
 	if yearlyCashflow.Exists() {
 		for _, cashflow := range yearlyCashflow.Array() {
-			sheet := newCashflowStatement(cashflow, true)
-			yearlyCashflowList = append(yearlyCashflowList, sheet)
+			statement := newCashflowStatement(ticker, cashflow, true)
+			env.Repository.CreateCashflowStatement(statement)
+			cashflowList = append(cashflowList, statement)
 		}
 	}
 
 	if yearlyIncome.Exists() {
 		for _, income := range yearlyIncome.Array() {
-			sheet := newIncomeStatement(income, true)
-			yearlyIncomeList = append(yearlyIncomeList, sheet)
+			statement := newIncomeStatement(ticker, income, true)
+			env.Repository.CreateIncomeStatement(statement)
+			incomeList = append(incomeList, statement)
 		}
 	}
 
 	if quarterlyBalanceSheets.Exists() {
 		for _, balanceSheet := range quarterlyBalanceSheets.Array() {
-			sheet := newBalanceSheetStatement(balanceSheet, false)
-			quarterlyBalanceSheetsList = append(quarterlyBalanceSheetsList, sheet)
+			statement := newBalanceSheetStatement(ticker, balanceSheet, false)
+			env.Repository.CreateBalanceSheetStatement(statement)
+			balanceSheetsList = append(balanceSheetsList, statement)
 		}
 	}
 
 	if quarterlyCashflow.Exists() {
 		for _, cashflow := range quarterlyCashflow.Array() {
-			sheet := newCashflowStatement(cashflow, false)
-			quarterlyCashflowList = append(quarterlyCashflowList, sheet)
+			statement := newCashflowStatement(ticker, cashflow, false)
+			env.Repository.CreateCashflowStatement(statement)
+			cashflowList = append(cashflowList, statement)
 		}
 	}
 
 	if quarterlyIncome.Exists() {
 		for _, income := range quarterlyIncome.Array() {
-			sheet := newIncomeStatement(income, false)
-			quarterlyIncomeList = append(quarterlyIncomeList, sheet)
+			statement := newIncomeStatement(ticker, income, false)
+			env.Repository.CreateIncomeStatement(statement)
+			incomeList = append(incomeList, statement)
 		}
 	}
 
-	stock := &Stock{
-		Ticker: ticker,
-		YearlyBalanceSheetStatements: yearlyBalanceSheetsList,
-		YearlyCashflowStatements: yearlyCashflowList,
-		YearlyIncomeStatements: yearlyIncomeList,
-		QuarterlyBalanceSheetStatements: quarterlyBalanceSheetsList,
-		QuarterlyCashflowStatements: quarterlyCashflowList,
-		QuarterlyIncomeStatements: quarterlyIncomeList,
-	}
-
-	fmt.Println("Quarterly balance sheets:", len(stock.QuarterlyBalanceSheetStatements))
-	fmt.Println("Quarterly cashflows:", len(stock.QuarterlyCashflowStatements))
-	fmt.Println("Quarterly incomes:", len(stock.QuarterlyIncomeStatements))
-	fmt.Println("Yearly balance sheets:", len(stock.YearlyBalanceSheetStatements))
-	fmt.Println("Yearly cashflows:", len(stock.YearlyCashflowStatements))
-	fmt.Println("Yearly incomes:", len(stock.YearlyIncomeStatements))
 }
 
-func newBalanceSheetStatement(data gjson.Result, yearly bool) *BalanceSheetStatement{
-	periodRaw := time.Unix(data.Get("endDate.raw").Int(), 0)
+func newBalanceSheetStatement(ticker string, data gjson.Result, yearly bool) *models.BalanceSheetStatement{
+	period := time.Unix(data.Get("endDate.raw").Int(), 0)
 
-	balanceSheetStatement := &BalanceSheetStatement{
-		Period: formatPeriod(periodRaw, yearly),
+	balanceSheetStatement := &models.BalanceSheetStatement{
+		Ticker: ticker,
+		Period: &period,
+		Yearly: yearly,
 	}
 
 	fillNumericValues(map[string]string{
@@ -146,6 +143,7 @@ func newBalanceSheetStatement(data gjson.Result, yearly bool) *BalanceSheetState
 		"CommonStock": "commonStock.raw",
 		"DeferredLongTermAssetCharges": "deferredLongTermAssetCharges.raw",
 		"RetainedEarnings": "retainedEarnings.raw",
+		"ShortTermInvestments": "shortTermInvestments.raw",
 		"LongTermInvestments": "longTermInvestments.raw",
 		"TotalStockholderEquity": "totalStockholderEquity.raw",
 		"Cash": "cash.raw",
@@ -156,11 +154,13 @@ func newBalanceSheetStatement(data gjson.Result, yearly bool) *BalanceSheetState
 	return balanceSheetStatement
 }
 
-func newCashflowStatement(data gjson.Result, yearly bool) *CashflowStatement{
-	periodRaw := time.Unix(data.Get("endDate.raw").Int(), 0)
+func newCashflowStatement(ticker string, data gjson.Result, yearly bool) *models.CashflowStatement{
+	period := time.Unix(data.Get("endDate.raw").Int(), 0)
 
-	cashflowStatement := &CashflowStatement{
-		Period: formatPeriod(periodRaw, yearly),
+	cashflowStatement := &models.CashflowStatement{
+		Ticker: ticker,
+		Period: &period,
+		Yearly: yearly,
 	}
 
 	fillNumericValues(map[string]string{
@@ -183,11 +183,13 @@ func newCashflowStatement(data gjson.Result, yearly bool) *CashflowStatement{
 	return cashflowStatement
 }
 
-func newIncomeStatement(data gjson.Result, yearly bool) *IncomeStatement{
-	periodRaw := time.Unix(data.Get("endDate.raw").Int(), 0)
+func newIncomeStatement(ticker string, data gjson.Result, yearly bool) *models.IncomeStatement{
+	period := time.Unix(data.Get("endDate.raw").Int(), 0)
 
-	incomeStatement := &IncomeStatement{
-		Period: formatPeriod(periodRaw, yearly),
+	incomeStatement := &models.IncomeStatement{
+		Ticker: ticker,
+		Period: &period,
+		Yearly: yearly,
 	}
 
 	fillNumericValues(map[string]string{
@@ -227,22 +229,38 @@ func fillNumericValues(mapping map[string]string, data gjson.Result, structure i
 	}
 }
 
+func isLastDayOfMonth(period *time.Time) bool {
+	firstOfMonth := time.Date(period.Year(), period.Month(), 1, 0, 0, 0, 0, period.Location())
+	lastOfMonth := firstOfMonth.AddDate(0, 1, -1)
+	return int(period.Day()) == int(lastOfMonth.Day())
+}
+
+func isLastMonthOfQuarter(period *time.Time) bool {
+	return period.Month() == 3 || period.Month() == 6 || period.Month() == 9 || period.Month() == 12
+}
+
 func formatPeriod(period time.Time, yearly bool) string {
 	year := strconv.Itoa(period.Year())
 
 	if yearly {
 		return year
-	} else {
-		switch period.Month() {
-		case 3:
-			return year + ".Q1"
-		case 6:
-			return year + ".Q2"
-		case 9:
-			return year + ".Q3"
-		case 12:
-			return year + ".Q4"
-		}
+	}
+
+	if isLastDayOfMonth(&period) && isLastMonthOfQuarter(&period) {
+		return year + ".Q" + strconv.Itoa(int(period.Month()) / 3)
+	}
+
+
+	switch period.Month() {
+	case 1, 2, 3:
+		lastYear := strconv.Itoa(period.Year() - 1)
+		return lastYear  + ".Q4"
+	case 4, 5, 6:
+		return year + ".Q1"
+	case 7, 8, 9:
+		return year + ".Q2"
+	case 10, 11, 12:
+		return year + ".Q3"
 	}
 
 	return "Unknown"
